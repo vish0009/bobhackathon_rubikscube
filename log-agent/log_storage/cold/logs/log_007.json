@@ -1,0 +1,1 @@
+{"log_id": "log_007", "timestamp": "2024-01-15 10:36:00+00:00", "service": "notification-service", "environment": "staging", "log_level": "INFO", "message": "Email sent successfully: recipient=user@example.com", "access_count_last_30_days": 2, "tags": ["notification"], "template_id": null}

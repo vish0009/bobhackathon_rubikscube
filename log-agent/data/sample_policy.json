@@ -1,0 +1,56 @@
+{
+  "retention_rules": {
+    "ERROR": {
+      "days": 90,
+      "tier": "hot",
+      "reason": "Critical for debugging production issues"
+    },
+    "WARN": {
+      "days": 60,
+      "tier": "warm",
+      "reason": "Important for trend analysis"
+    },
+    "INFO": {
+      "days": 30,
+      "tier": "cold",
+      "reason": "General operational visibility"
+    },
+    "DEBUG": {
+      "days": 7,
+      "tier": "cold",
+      "reason": "Development troubleshooting only"
+    }
+  },
+  "compliance_overrides": {
+    "audit-service": {
+      "retention_days": 365,
+      "tier": "hot",
+      "reason": "Regulatory compliance requirement - must retain audit logs for 1 year"
+    },
+    "payment-processor": {
+      "retention_days": 180,
+      "tier": "warm",
+      "reason": "Financial compliance - PCI DSS requirements"
+    }
+  },
+  "storage_costs": {
+    "hot": 0.023,
+    "warm": 0.01,
+    "cold": 0.004,
+    "archive": 0.001
+  },
+  "environment_rules": {
+    "prod": {
+      "min_retention_days": 30,
+      "reason": "Production logs must be retained for at least 30 days"
+    },
+    "staging": {
+      "min_retention_days": 14,
+      "reason": "Staging logs retained for 2 weeks"
+    },
+    "dev": {
+      "min_retention_days": 7,
+      "reason": "Development logs retained for 1 week"
+    }
+  }
+}

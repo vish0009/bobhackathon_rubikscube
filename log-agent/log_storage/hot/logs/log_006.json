@@ -1,0 +1,1 @@
+{"log_id": "log_006", "timestamp": "2024-01-15 10:35:00+00:00", "service": "database-service", "environment": "prod", "log_level": "ERROR", "message": "Query execution failed: syntax error near 'SELECT'", "access_count_last_30_days": 25, "tags": ["database", "critical"], "template_id": null}

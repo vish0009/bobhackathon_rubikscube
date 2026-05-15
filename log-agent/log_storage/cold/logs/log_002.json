@@ -1,0 +1,1 @@
+{"log_id": "log_002", "timestamp": "2024-01-15 10:31:00+00:00", "service": "auth-service", "environment": "prod", "log_level": "INFO", "message": "User login successful: user_id=12345", "access_count_last_30_days": 3, "tags": ["security", "auth"], "template_id": null}

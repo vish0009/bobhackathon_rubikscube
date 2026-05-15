@@ -1,0 +1,1 @@
+{"log_id": "log_005", "timestamp": "2024-01-15 10:34:00+00:00", "service": "api-gateway", "environment": "dev", "log_level": "DEBUG", "message": "Request received: GET /api/v1/users", "access_count_last_30_days": 0, "tags": ["application"], "template_id": null}
