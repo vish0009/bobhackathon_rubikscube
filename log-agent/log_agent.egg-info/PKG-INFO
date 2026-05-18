@@ -9,16 +9,22 @@ Requires-Dist: pydantic>=2.0.0
 Requires-Dist: drain3>=0.9.11
 Requires-Dist: anthropic>=0.18.0
 Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: boto3>=1.28.0
 Provides-Extra: dev
 Requires-Dist: pytest>=7.4.0; extra == "dev"
 Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
 Requires-Dist: black>=23.0.0; extra == "dev"
 Requires-Dist: ruff>=0.1.0; extra == "dev"
+Requires-Dist: httpx>=0.25.0; extra == "dev"
 Provides-Extra: api
 Requires-Dist: fastapi>=0.104.0; extra == "api"
 Requires-Dist: uvicorn>=0.24.0; extra == "api"
+Requires-Dist: httpx>=0.25.0; extra == "api"
 Provides-Extra: dashboard
 Requires-Dist: streamlit>=1.28.0; extra == "dashboard"
+Requires-Dist: pandas>=2.0.0; extra == "dashboard"
+Requires-Dist: plotly>=5.17.0; extra == "dashboard"
+Requires-Dist: requests>=2.31.0; extra == "dashboard"
 
 # Autonomous Log Cleanup & Archival Agent
 
@@ -90,17 +96,35 @@ python -m log_agent data/sample_logs.json data/sample_policy.json
 
 This mode uses only rule-based classification. Perfect for testing and development.
 
-#### 2. LLM-Enhanced Mode (Requires API Key)
+#### 2. Bob Shell Mode (Local AI Inference - RECOMMENDED)
 
 ```bash
-# Set your Anthropic API key
-export ANTHROPIC_API_KEY=your_key_here
+# Set environment variable to use Bob Shell
+export USE_BOB_SHELL=true
 
-# Run with LLM fallback
+# Optional: Specify Bob Shell path if not in PATH
+export BOB_SHELL_PATH=/path/to/bob
+
+# Run with Bob Shell LLM fallback
 python -m log_agent data/sample_logs.json data/sample_policy.json
 ```
 
-This mode uses LLM for ambiguous templates that rules can't classify with high confidence.
+This mode uses Bob Shell (local AI assistant) for LLM fallback. No API costs, no authentication needed!
+
+#### 3. API-Based LLM Mode (Requires API Key)
+
+```bash
+# Option A: Use Anthropic API
+export ANTHROPIC_API_KEY=sk-ant-your_key_here
+
+# Option B: Use IBM Bob API (requires valid JWT token)
+export BOB_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+# Run with API-based LLM fallback
+python -m log_agent data/sample_logs.json data/sample_policy.json
+```
+
+This mode uses external API for LLM fallback. Requires valid API credentials.
 
 ### Expected Output (Phase 2)
 
@@ -172,16 +196,20 @@ log-agent/
 │   │   ├── decision.py
 │   │   ├── audit_entry.py
 │   │   └── policy.py
-│   └── storage/             # Storage backends
-│       ├── backend.py       # Abstract interface
-│       ├── local_backend.py # ✓ Local filesystem
-│       └── s3_backend.py    # S3 stub (Phase 3)
+│   ├── storage/             # Storage backends
+│   │   ├── backend.py       # Abstract interface
+│   │   ├── local_backend.py # ✓ Local filesystem
+│   │   └── s3_backend.py    # ✓ S3 implementation (Phase 3)
+│   └── api/                 # REST API (Phase 3)
+│       ├── __init__.py
+│       └── main.py          # ✓ FastAPI application
 ├── data/
 │   ├── sample_logs.json     # Sample log data
 │   └── sample_policy.json   # Sample policy rules
 ├── tests/                   # Test suite
 │   ├── test_classifier.py   # Classification tests
-│   └── test_phase2_integration.py  # ✓ Phase 2 integration tests
+│   ├── test_phase2_integration.py  # ✓ Phase 2 integration tests
+│   └── test_api.py          # ✓ API tests (Phase 3)
 ├── pyproject.toml           # Project configuration
 └── README.md                # This file
 ```
@@ -190,17 +218,17 @@ log-agent/
 
 ### API Key Setup
 
-The system uses Anthropic's Claude API for LLM fallback. Set your API key:
+The system uses the configured LLM fallback with `BOB_API_KEY`. Set your API key:
 
 ```bash
 # Linux/Mac
-export ANTHROPIC_API_KEY=your_key_here
+export BOB_API_KEY=your_key_here
 
 # Windows PowerShell
-$env:ANTHROPIC_API_KEY="your_key_here"
+$env:BOB_API_KEY="your_key_here"
 
 # Windows CMD
-set ANTHROPIC_API_KEY=your_key_here
+set BOB_API_KEY=your_key_here
 ```
 
 **Important**: The system gracefully degrades to rules-only mode if no API key is provided.
@@ -312,6 +340,400 @@ The system now runs end-to-end:
 3. **Decision Making**: Apply policy rules and compliance overrides
 4. **Execution**: Perform actions and log to audit trail
 
+## Phase 3 Features (NEW!)
+
+### FastAPI REST API
+A complete REST API for log ingestion and querying:
+
+#### Starting the API Server
+
+```bash
+# Install API dependencies
+pip install -e ".[api]"
+
+# Start the server
+python -m log_agent.api.main
+
+# Or with uvicorn directly
+uvicorn log_agent.api.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+The API will be available at `http://localhost:8000`
+
+#### API Authentication
+
+The API supports optional API key authentication:
+
+```bash
+# Set API key (optional - if not set, authentication is disabled)
+export LOG_AGENT_API_KEY=your-secret-key-here
+
+# Start server with authentication enabled
+python -m log_agent.api.main
+```
+
+Protected endpoints (POST/PUT operations) require the `X-API-Key` header when authentication is enabled.
+
+#### API Endpoints
+
+**General Endpoints:**
+- `GET /` - API status and version
+- `GET /health` - Health check
+- `GET /stats` - System statistics
+
+**Log Ingestion:**
+- `POST /logs/ingest` - Ingest and process logs (requires API key if configured)
+
+**Template Queries:**
+- `GET /templates` - List all templates with pagination and filtering
+- `GET /templates/{template_id}` - Get specific template details
+
+**Classification Queries:**
+- `GET /classifications` - List classifications with filtering
+
+**Decision History:**
+- `GET /decisions` - List all decisions with filtering
+
+**Audit Trail:**
+- `GET /audit` - Get audit trail with pagination
+
+**Policy Management:**
+- `GET /policy` - Get current policy
+- `PUT /policy` - Update policy (requires API key if configured)
+
+#### API Usage Examples
+
+**1. Ingest Logs**
+
+```bash
+# Without authentication (dev mode)
+curl -X POST http://localhost:8000/logs/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "logs": [
+      {
+        "log_id": "log_001",
+        "timestamp": "2024-01-15T10:30:00Z",
+        "service": "api-gateway",
+        "environment": "prod",
+        "log_level": "ERROR",
+        "message": "Database connection failed: timeout after 30s",
+        "access_count_last_30_days": 150,
+        "tags": []
+      }
+    ],
+    "process_immediately": true
+  }'
+
+# With authentication
+curl -X POST http://localhost:8000/logs/ingest \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-secret-key-here" \
+  -d '{"logs": [...], "process_immediately": true}'
+```
+
+**2. List Templates**
+
+```bash
+# Get all templates
+curl http://localhost:8000/templates
+
+# With pagination
+curl "http://localhost:8000/templates?limit=10&offset=0"
+
+# Filter by severity
+curl "http://localhost:8000/templates?severity=HIGH"
+```
+
+**3. Get Template Details**
+
+```bash
+curl http://localhost:8000/templates/template_1
+```
+
+**4. List Classifications**
+
+```bash
+# All classifications
+curl http://localhost:8000/classifications
+
+# Filter by type and severity
+curl "http://localhost:8000/classifications?type=DATABASE&severity=HIGH"
+```
+
+**5. Get Decisions**
+
+```bash
+# All decisions
+curl http://localhost:8000/decisions
+
+# Filter by action
+curl "http://localhost:8000/decisions?action=RETAIN"
+```
+
+**6. Get Audit Trail**
+
+```bash
+curl http://localhost:8000/audit
+```
+
+**7. Get System Stats**
+
+```bash
+curl http://localhost:8000/stats
+```
+
+**8. Update Policy**
+
+```bash
+curl -X PUT http://localhost:8000/policy \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-secret-key-here" \
+  -d '{
+    "retention_rules": {
+      "ERROR": 90,
+      "WARN": 60,
+      "INFO": 30,
+      "DEBUG": 7
+    },
+    "compliance_overrides": {
+      "compliance": "RETAIN",
+      "audit": "RETAIN"
+    },
+    "storage_costs": {
+      "HOT": 0.023,
+      "WARM": 0.0125,
+      "COLD": 0.004,
+      "ARCHIVE": 0.00099
+    },
+    "environment_rules": {
+      "prod": {"min_retention_days": 30},
+      "staging": {"min_retention_days": 14},
+      "dev": {"min_retention_days": 7}
+    }
+  }'
+```
+
+#### Python Client Example
+
+```python
+import requests
+import json
+
+# API configuration
+API_URL = "http://localhost:8000"
+API_KEY = "your-secret-key-here"  # Optional
+
+headers = {
+    "Content-Type": "application/json",
+    "X-API-Key": API_KEY  # Include if authentication is enabled
+}
+
+# Ingest logs
+logs_data = {
+    "logs": [
+        {
+            "log_id": "log_001",
+            "timestamp": "2024-01-15T10:30:00Z",
+            "service": "api-gateway",
+            "environment": "prod",
+            "log_level": "ERROR",
+            "message": "Database connection failed",
+            "access_count_last_30_days": 150,
+            "tags": []
+        }
+    ],
+    "process_immediately": True
+}
+
+response = requests.post(
+    f"{API_URL}/logs/ingest",
+    headers=headers,
+    json=logs_data
+)
+print(f"Ingestion result: {response.json()}")
+
+# Query templates
+response = requests.get(f"{API_URL}/templates")
+templates = response.json()
+print(f"Total templates: {templates['total']}")
+
+# Get system stats
+response = requests.get(f"{API_URL}/stats")
+stats = response.json()
+print(f"Stats: {json.dumps(stats, indent=2)}")
+```
+
+### S3 Storage Backend
+
+Full S3 backend implementation with storage class management:
+
+```python
+from log_agent.storage import S3Backend
+from log_agent.models import Tier
+
+# Initialize S3 backend
+storage = S3Backend(
+    bucket_name="my-log-bucket",
+    region="us-east-1",
+    prefix="logs/"
+)
+
+# Write to S3 with storage class
+data = b"log data"
+storage.write(data, "logs/log_001.json", Tier.HOT)  # Uses S3 Standard
+
+# Change storage tier
+storage.set_tier("logs/log_001.json", Tier.COLD)  # Moves to Glacier Instant Retrieval
+
+# Read from S3
+data = storage.read("logs/log_001.json")
+
+# List objects
+files = storage.list("logs/")
+```
+
+**Storage Class Mapping:**
+- `HOT` → S3 Standard
+- `WARM` → S3 Standard-IA (Infrequent Access)
+- `COLD` → S3 Glacier Instant Retrieval
+- `ARCHIVE` → S3 Glacier Deep Archive
+
+### Running API Tests
+
+```bash
+# Install test dependencies
+pip install -e ".[dev,api]"
+
+# Run API tests
+pytest tests/test_api.py -v
+
+# Run all tests
+pytest tests/ -v
+```
+## Phase 4 Features (NEW!)
+
+### Streamlit Dashboard
+
+A comprehensive web-based dashboard for visualizing and managing log data:
+
+#### Starting the Dashboard
+
+```bash
+# Install dashboard dependencies
+pip install -e ".[dashboard]"
+
+# Start the dashboard (requires API server to be running)
+streamlit run log_agent/dashboard/app.py
+
+# Or with custom port
+streamlit run log_agent/dashboard/app.py --server.port 8501
+```
+
+The dashboard will be available at `http://localhost:8501`
+
+**Prerequisites**: The FastAPI server must be running on `http://localhost:8000` for the dashboard to function.
+
+#### Dashboard Features
+
+**1. Overview Page**
+- System health status and API connectivity
+- Key metrics: total logs processed, unique templates, decisions, audit entries
+- Storage tier distribution with interactive pie chart
+- Quick action buttons for common tasks
+
+**2. Template Explorer**
+- Browse all extracted log templates
+- Filter by severity level
+- Pagination support for large datasets
+- Detailed view showing:
+  - Template pattern and ID
+  - Match count and timestamps
+  - Classification details (type, severity, signal quality)
+  - Confidence scores and classification method
+
+**3. Classification Statistics**
+- Summary metrics: total classifications, rule-based vs LLM percentages
+- Interactive charts:
+  - Severity distribution bar chart
+  - Type distribution pie chart
+  - Classification method comparison
+  - Signal quality distribution
+- Average confidence score tracking
+
+**4. Decision History**
+- View all policy decisions with filtering
+- Filter by action type (RETAIN, ARCHIVE, DELETE, COMPRESS)
+- Policy override tracking and visualization
+- Action distribution pie chart
+- Detailed reasoning for each decision
+
+**5. Audit Trail Viewer**
+- Complete audit log of all executed actions
+- Filter by action type
+- Pagination for large audit trails
+- Metrics: total logs affected, bytes freed
+- Detailed metadata for each audit entry
+
+**6. Policy Management UI**
+- View and edit current policy configuration
+- Tabs for different policy sections:
+  - Retention rules (editable with validation)
+  - Compliance overrides
+  - Storage costs by tier
+  - Environment-specific rules
+- Save changes with immediate effect
+- Advanced JSON editor for power users
+
+**7. Log Ingestion Interface**
+- Upload and process logs directly from the UI
+- Sample log template provided
+- JSON validation
+- Immediate or background processing options
+- Real-time feedback on ingestion results
+
+#### Dashboard Configuration
+
+The dashboard supports API key authentication and custom API URLs:
+
+1. **API URL Configuration**: Set the API base URL in the sidebar (default: `http://localhost:8000`)
+2. **API Key**: Optionally provide an API key for protected endpoints
+3. **Navigation**: Use the sidebar to switch between different pages
+4. **Auto-refresh**: Use the refresh button to update data
+
+#### Dashboard Usage Examples
+
+**Starting Both Services:**
+
+```bash
+# Terminal 1: Start API server
+python -m log_agent.api.main
+
+# Terminal 2: Start dashboard
+streamlit run log_agent/dashboard/app.py
+```
+
+**Accessing the Dashboard:**
+
+1. Open browser to `http://localhost:8501`
+2. Check API connectivity on Overview page
+3. Navigate using sidebar buttons
+4. Use filters and pagination to explore data
+5. Ingest logs using the Log Ingestion page
+6. Monitor changes in real-time
+
+**Dashboard Screenshots:**
+
+The dashboard provides:
+- 📊 **Overview**: System health and key metrics
+- 📝 **Templates**: Browse and filter log templates
+- 📊 **Classifications**: Statistical analysis with charts
+- ⚖️ **Decisions**: Policy decision history
+- 📋 **Audit Trail**: Complete action log
+- ⚙️ **Policy**: Configuration management
+- 📥 **Ingest Logs**: Upload interface
+
+
 ## Roadmap
 
 ### Phase 1 ✓ COMPLETE
@@ -326,17 +748,22 @@ The system now runs end-to-end:
 - Execution Agent with audit trail
 - Integration tests and full pipeline
 
-### Phase 3 (Next)
-- FastAPI ingestion endpoint
-- Query API for template lookup
-- S3Backend implementation
-- Real-time processing
+### Phase 3 ✓ COMPLETE
+- FastAPI REST API with all endpoints
+- API key authentication
+- S3Backend implementation with storage classes
+- Comprehensive API tests
+- API documentation and examples
 
-### Phase 4
-- Streamlit dashboard
-- Real-time log streaming
-- Cost optimization analytics
-- Multi-tenant support
+### Phase 4 ✓ COMPLETE
+- Streamlit dashboard with comprehensive visualization
+- Template explorer with filtering
+- Classification statistics and charts
+- Decision history viewer
+- Audit trail browser
+- Policy management UI
+- Log ingestion interface
+- Real-time data refresh
 
 ## Contributing
 

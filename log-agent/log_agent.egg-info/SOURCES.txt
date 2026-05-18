@@ -10,6 +10,7 @@ log_agent.egg-info/requires.txt
 log_agent.egg-info/top_level.txt
 log_agent/agents/__init__.py
 log_agent/agents/classifier.py
+log_agent/agents/classifier_bob_shell.py
 log_agent/agents/decider.py
 log_agent/agents/executor.py
 log_agent/agents/valuer.py
@@ -31,5 +32,6 @@ log_agent/storage/backend.py
 log_agent/storage/local_backend.py
 log_agent/storage/s3_backend.py
 log_agent/tests/__init__.py
+tests/test_api.py
 tests/test_classifier.py
 tests/test_phase2_integration.py
