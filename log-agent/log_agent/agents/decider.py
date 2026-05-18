@@ -136,23 +136,26 @@ class DecisionAgent:
         # Check if any log has compliance tags
         for log in logs:
             if hasattr(log, 'tags') and log.tags:
-                # Check if any tag matches compliance overrides
-                for tag in log.tags:
-                    if tag == "compliance" or tag == "audit":
-                        # Check if service has compliance override in policy
-                        service = log.service
-                        if service in self.policy.compliance_overrides:
-                            override = self.policy.compliance_overrides[service]
-                            return Decision(
-                                template_id=logs[0].log_id if logs else "unknown",  # Will be set by caller
-                                action="RETAIN",
-                                reasoning=(
-                                    f"Compliance override: {override['reason']} "
-                                    f"(retain {override['retention_days']} days in {override['tier']} tier)"
-                                ),
-                                policy_override=True,
-                                policy_rule_applied=f"compliance_override:{service}"
-                            )
+                has_compliance_tag = any(tag in {"compliance", "audit"} for tag in log.tags)
+                if not has_compliance_tag:
+                    continue
+
+                service = log.service
+                if service in self.policy.compliance_overrides:
+                    override = self.policy.compliance_overrides[service]
+                    reason = override.get("reason", "Compliance retention policy")
+                    retention_days = override.get("retention_days", "unknown")
+                    tier = override.get("tier", "hot")
+                    return Decision(
+                        template_id="unknown",  # overwritten by caller when needed
+                        action="RETAIN",
+                        reasoning=(
+                            f"Compliance override: {reason} "
+                            f"(retain {retention_days} days in {tier} tier)"
+                        ),
+                        policy_override=True,
+                        policy_rule_applied=f"compliance_override:{service}"
+                    )
         
         return None
     
@@ -189,7 +192,8 @@ class DecisionAgent:
         # Check if environment has specific rules
         if env in self.policy.environment_rules:
             env_rule = self.policy.environment_rules[env]
-            min_retention = env_rule["min_retention_days"]
+            min_retention = env_rule.get("min_retention_days", 0)
+            reason = env_rule.get("reason", f"{env} environment minimum retention policy")
             
             # If value assessment recommends DELETE but environment requires retention
             if value_score.recommended_action == "DELETE" and min_retention > 0:
@@ -197,7 +201,7 @@ class DecisionAgent:
                     template_id=value_score.template_id,
                     action="ARCHIVE",
                     reasoning=(
-                        f"Environment rule override: {env_rule['reason']} "
+                        f"Environment rule override: {reason} "
                         f"(min {min_retention} days). Changed DELETE to ARCHIVE."
                     ),
                     policy_override=True,
@@ -242,6 +246,12 @@ class DecisionAgent:
         # Check if log level has retention rules
         if level in self.policy.retention_rules:
             rule = self.policy.retention_rules[level]
+            if not isinstance(rule, dict):
+                return None
+
+            reason = rule.get("reason", f"{level} retention rule")
+            days = rule.get("days", "unknown")
+            tier = rule.get("tier", "hot")
             
             # For ERROR logs, always RETAIN (override if value assessment says otherwise)
             if level == "ERROR" and value_score.recommended_action != "RETAIN":
@@ -249,8 +259,8 @@ class DecisionAgent:
                     template_id=value_score.template_id,
                     action="RETAIN",
                     reasoning=(
-                        f"Retention rule override: {rule['reason']} "
-                        f"(retain {rule['days']} days in {rule['tier']} tier). "
+                        f"Retention rule override: {reason} "
+                        f"(retain {days} days in {tier} tier). "
                         f"Changed {value_score.recommended_action} to RETAIN."
                     ),
                     policy_override=True,
@@ -263,8 +273,8 @@ class DecisionAgent:
                     template_id=value_score.template_id,
                     action="ARCHIVE",
                     reasoning=(
-                        f"Retention rule override: {rule['reason']} "
-                        f"(retain {rule['days']} days in {rule['tier']} tier). "
+                        f"Retention rule override: {reason} "
+                        f"(retain {days} days in {tier} tier). "
                         f"Changed DELETE to ARCHIVE."
                     ),
                     policy_override=True,

@@ -3,17 +3,32 @@ CLI entrypoint for the log agent system.
 
 Usage:
     python -m log_agent data/sample_logs.json [data/sample_policy.json]
+    
+Environment Variables:
+    USE_BOB_SHELL=true    - Use Bob Shell for LLM fallback (local inference)
+    BOB_SHELL_PATH=path   - Path to bob executable (default: "bob")
+    ANTHROPIC_API_KEY=key - Use Anthropic API for LLM fallback
+    BOB_API_KEY=key       - Use IBM Bob API for LLM fallback
 """
 
 import sys
 import json
+import os
 from pathlib import Path
 from datetime import datetime
 
 from .config import setup_logging, get_logger
 from .models import LogEntry, Policy
-from .agents import ClassificationAgent, ValueAssessmentAgent, DecisionAgent, ExecutionAgent
+from .agents import ValueAssessmentAgent, DecisionAgent, ExecutionAgent
 from .storage import LocalFilesystemBackend
+
+# Import appropriate classifier based on environment
+if os.getenv("USE_BOB_SHELL", "false").lower() == "true":
+    from .agents.classifier_bob_shell import ClassificationAgentBobShell as ClassificationAgent
+    CLASSIFIER_TYPE = "Bob Shell"
+else:
+    from .agents import ClassificationAgent
+    CLASSIFIER_TYPE = "API"
 
 # Setup logging
 setup_logging(level="INFO")
@@ -166,8 +181,16 @@ def main():
         storage = LocalFilesystemBackend(base_path="./log_storage")
         
         # Initialize agents
-        logger.info("system.main: Initializing agents")
-        classifier = ClassificationAgent(use_llm=True)
+        logger.info(f"system.main: Initializing agents (Classifier: {CLASSIFIER_TYPE})")
+        
+        # Initialize classifier with Bob Shell path if specified
+        if CLASSIFIER_TYPE == "Bob Shell":
+            bob_shell_path = os.getenv("BOB_SHELL_PATH", "bob")
+            classifier = ClassificationAgent(use_llm=True, bob_shell_path=bob_shell_path)
+            logger.info(f"system.main: Using Bob Shell at: {bob_shell_path}")
+        else:
+            classifier = ClassificationAgent(use_llm=True)
+        
         valuer = ValueAssessmentAgent()
         decider = DecisionAgent(policy)
         executor = ExecutionAgent(storage)
@@ -197,6 +220,29 @@ def main():
         print_pipeline_summary(
             templates, classifications, value_scores, decisions, audit_entries, line_to_template
         )
+        
+        # Print classifier info
+        if CLASSIFIER_TYPE == "Bob Shell":
+            print(f"\n{'CLASSIFIER INFORMATION':^80}")
+            print("-"*80)
+            print(f"Classifier Type: Bob Shell (Local AI Inference)")
+            print(f"LLM Enabled: {classifier.use_llm}")
+            if hasattr(classifier, 'token_usage'):
+                print(f"Bob Shell Calls: {classifier.token_usage['llm_calls']}")
+                print(f"Approximate Tokens: {classifier.token_usage['total_tokens']}")
+        else:
+            print(f"\n{'CLASSIFIER INFORMATION':^80}")
+            print("-"*80)
+            print(f"Classifier Type: API-based")
+            if hasattr(classifier, 'use_bob_endpoint') and classifier.use_bob_endpoint:
+                print(f"API Endpoint: IBM Bob API")
+            elif hasattr(classifier, 'api_key') and classifier.api_key:
+                print(f"API Endpoint: Anthropic")
+            else:
+                print(f"API Endpoint: None (Rules-only mode)")
+            if hasattr(classifier, 'token_usage'):
+                print(f"LLM Calls: {classifier.token_usage['llm_calls']}")
+                print(f"Total Tokens: {classifier.token_usage['total_tokens']}")
         
         logger.info("system.main: Demo complete")
         

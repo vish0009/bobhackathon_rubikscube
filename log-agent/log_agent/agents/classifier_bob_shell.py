@@ -1,15 +1,14 @@
 """
-Classification Agent - Classifies log templates using rules and LLM fallback.
+Classification Agent with Bob Shell Integration - Uses local Bob Shell for LLM fallback.
 
-This agent implements template-level processing to dramatically reduce costs:
-- Extracts templates using Drain3
-- Applies rule-based classification first (80%+ coverage)
-- Falls back to LLM only for ambiguous templates
-- Maintains line-to-template mapping for final output
+This version uses Bob Shell (the AI assistant) as a subprocess for classification,
+avoiding API authentication issues and providing immediate LLM capabilities.
 """
 
 import os
 import json
+import subprocess
+import tempfile
 from typing import List, Dict, Tuple, Optional
 from datetime import datetime
 from drain3 import TemplateMiner
@@ -21,28 +20,26 @@ from ..config import get_logger
 logger = get_logger("system.classifier")
 
 
-class ClassificationAgent:
+class ClassificationAgentBobShell:
     """
-    Agent responsible for classifying log templates.
+    Agent responsible for classifying log templates using Bob Shell.
     
     Uses a three-tier approach:
     1. Drain3 for template extraction
     2. Rule-based classification for common patterns
-    3. LLM fallback for ambiguous cases
+    3. Bob Shell fallback for ambiguous cases (via subprocess)
     """
     
-    def __init__(self, use_llm: bool = True):
+    def __init__(self, use_llm: bool = True, bob_shell_path: str = "bob"):
         """
-        Initialize the classification agent.
+        Initialize the classification agent with Bob Shell integration.
         
         Args:
-            use_llm: Whether to use LLM fallback (requires ANTHROPIC_API_KEY or BOB_API_KEY)
+            use_llm: Whether to use Bob Shell fallback
+            bob_shell_path: Path to bob executable (default: "bob" assumes it's in PATH)
         """
         self.use_llm = use_llm
-        # Check for API keys - prefer Anthropic, fallback to IBM Bob
-        self.api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("BOB_API_KEY")
-        self.use_bob_endpoint = bool(os.getenv("BOB_API_KEY")) and not os.getenv("ANTHROPIC_API_KEY")
-        self.bob_endpoint = os.getenv("BOB_ENDPOINT", "https://api.us-east.bob.ibm.com")
+        self.bob_shell_path = bob_shell_path
         
         self.token_usage = {
             "input_tokens": 0,
@@ -51,14 +48,23 @@ class ClassificationAgent:
             "llm_calls": 0
         }
         
-        if self.use_llm and not self.api_key:
-            logger.warning(
-                "system.classifier: No ANTHROPIC_API_KEY or BOB_API_KEY found, using rules-only mode"
-            )
-            self.use_llm = False
-        elif self.use_llm:
-            endpoint_type = "IBM Bob" if self.use_bob_endpoint else "Anthropic"
-            logger.info(f"system.classifier: Using {endpoint_type} endpoint for LLM fallback")
+        # Test if Bob Shell is available
+        if self.use_llm:
+            try:
+                result = subprocess.run(
+                    [self.bob_shell_path, "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    logger.info(f"system.classifier: Bob Shell available at {self.bob_shell_path}")
+                else:
+                    logger.warning("system.classifier: Bob Shell not found, using rules-only mode")
+                    self.use_llm = False
+            except Exception as e:
+                logger.warning(f"system.classifier: Bob Shell not available ({e}), using rules-only mode")
+                self.use_llm = False
         
         # Initialize Drain3 with default config
         config = TemplateMinerConfig()
@@ -76,7 +82,7 @@ class ClassificationAgent:
         self.classification_cache: Dict[str, Classification] = {}
         
         logger.info(
-            f"system.classifier: Initialized (LLM={'enabled' if self.use_llm else 'disabled'})"
+            f"system.classifier: Initialized (LLM={'Bob Shell' if self.use_llm else 'disabled'})"
         )
     
     def classify(self, log_entries: List[LogEntry]) -> Tuple[
@@ -115,7 +121,7 @@ class ClassificationAgent:
         
         logger.info(
             f"system.classifier: Classification complete - "
-            f"Rule: {rule_count}, LLM: {llm_count}, Default: {default_count}"
+            f"Rule: {rule_count}, Bob Shell: {llm_count}, Default: {default_count}"
         )
         
         return templates, classifications, line_to_template
@@ -162,7 +168,7 @@ class ClassificationAgent:
         self, template: Template, log_entries: List[LogEntry]
     ) -> Classification:
         """
-        Classify a single template using rules first, then LLM fallback.
+        Classify a single template using rules first, then Bob Shell fallback.
         
         Args:
             template: Template to classify
@@ -188,9 +194,9 @@ class ClassificationAgent:
         # Try rule-based classification first
         classification, confidence = self._rule_based_classify(template, sample_entries)
         
-        # If confidence is low and LLM is available, use LLM fallback
+        # If confidence is low and Bob Shell is available, use Bob Shell fallback
         if confidence < 0.7 and self.use_llm:
-            classification = self._llm_classify(template, sample_entries)
+            classification = self._bob_shell_classify(template, sample_entries)
         
         # Cache the result
         self.classification_cache[template.template_id] = classification
@@ -233,7 +239,6 @@ class ClassificationAgent:
             "TRACE": "VERY_LOW"
         }
         severity = severity_map.get(sample.log_level.upper(), "LOW")
-        # Only high confidence if log level is explicitly mapped
         if sample.log_level.upper() in severity_map:
             confidence_factors.append(0.4)
         else:
@@ -244,7 +249,7 @@ class ClassificationAgent:
         category_confidence = 0.0
         if "compliance" in sample.tags or "audit" in sample.service.lower():
             log_type = "COMPLIANCE"
-            category_confidence = 0.5  # High confidence for explicit tags
+            category_confidence = 0.5
         elif "security" in sample.tags or "auth" in sample.service.lower():
             log_type = "SECURITY"
             category_confidence = 0.5
@@ -254,9 +259,9 @@ class ClassificationAgent:
         elif any(keyword in template.pattern.lower()
                  for keyword in ["error", "fail", "exception"]):
             log_type = "APPLICATION"
-            category_confidence = 0.3  # Medium confidence for pattern matching
+            category_confidence = 0.3
         else:
-            category_confidence = 0.1  # Low confidence for default
+            category_confidence = 0.1
         confidence_factors.append(category_confidence)
         
         # Rule 3: Environment → Signal quality
@@ -268,12 +273,12 @@ class ClassificationAgent:
         elif sample.environment.lower() in ["staging", "stage"]:
             signal_quality = "MEDIUM"
             env_confidence = 0.2
-        else:  # dev, test, etc.
+        else:
             signal_quality = "LOW"
             env_confidence = 0.1
         confidence_factors.append(env_confidence)
         
-        # Calculate final confidence as average of factors (more conservative)
+        # Calculate final confidence as average
         confidence = sum(confidence_factors) / len(confidence_factors)
         
         classification = Classification(
@@ -287,11 +292,11 @@ class ClassificationAgent:
         
         return classification, confidence
     
-    def _llm_classify(
+    def _bob_shell_classify(
         self, template: Template, sample_entries: List[LogEntry]
     ) -> Classification:
         """
-        Use LLM to classify ambiguous templates.
+        Use Bob Shell to classify ambiguous templates.
         
         Args:
             template: Template to classify
@@ -313,7 +318,7 @@ Template Pattern: {template.pattern}
 Sample Log Entries:
 {samples_text}
 
-Provide classification in JSON format:
+Provide classification in JSON format ONLY (no markdown, no explanation):
 {{
   "type": "APPLICATION|DATABASE|SECURITY|COMPLIANCE|INFRASTRUCTURE",
   "severity": "CRITICAL|HIGH|MEDIUM|LOW|VERY_LOW",
@@ -323,88 +328,48 @@ Provide classification in JSON format:
 Consider:
 - Type: What system component does this relate to?
 - Severity: How critical is this log for debugging/monitoring?
-- Signal Quality: How valuable is this for observability?"""
+- Signal Quality: How valuable is this for observability?
+
+Respond with ONLY the JSON object, nothing else."""
         
-        if self.use_bob_endpoint:
-            return self._llm_classify_bob(template, prompt)
-        else:
-            return self._llm_classify_anthropic(template, prompt)
-    
-    def _llm_classify_anthropic(
-        self, template: Template, prompt: str
-    ) -> Classification:
-        """Use Anthropic API for classification."""
         try:
-            from anthropic import Anthropic
+            # Create temporary file for prompt
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                f.write(prompt)
+                prompt_file = f.name
             
-            client = Anthropic(api_key=self.api_key)
-            
-            response = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=200,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            
-            # Track token usage
-            usage = getattr(response, "usage", None)
-            input_tokens = getattr(usage, "input_tokens", 0) if usage else 0
-            output_tokens = getattr(usage, "output_tokens", 0) if usage else 0
-            self.token_usage["input_tokens"] += input_tokens
-            self.token_usage["output_tokens"] += output_tokens
-            self.token_usage["total_tokens"] += input_tokens + output_tokens
-            self.token_usage["llm_calls"] += 1
-
-            # Parse response
-            response_text = ""
-            for block in response.content:
-                if hasattr(block, "text"):
-                    response_text = block.text
-                    break
-            
-            return self._parse_llm_response(template, response_text)
-            
+            try:
+                # Call Bob Shell with the prompt
+                result = subprocess.run(
+                    [self.bob_shell_path, "ask", prompt],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+                
+                if result.returncode == 0:
+                    response_text = result.stdout.strip()
+                    
+                    # Track usage (approximate)
+                    self.token_usage["llm_calls"] += 1
+                    self.token_usage["input_tokens"] += len(prompt.split())
+                    self.token_usage["output_tokens"] += len(response_text.split())
+                    self.token_usage["total_tokens"] += len(prompt.split()) + len(response_text.split())
+                    
+                    return self._parse_llm_response(template, response_text)
+                else:
+                    logger.error(f"system.classifier: Bob Shell failed: {result.stderr}")
+                    return self._default_classification(template)
+                    
+            finally:
+                # Clean up temp file
+                try:
+                    os.unlink(prompt_file)
+                except:
+                    pass
+                    
         except Exception as e:
-            logger.error(f"system.classifier: Anthropic API failed: {e}")
-            return self._default_classification(template)
-    
-    def _llm_classify_bob(
-        self, template: Template, prompt: str
-    ) -> Classification:
-        """Use IBM Bob API for classification."""
-        try:
-            import requests
-            
-            response = requests.post(
-                f"{self.bob_endpoint}/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "claude-3-5-sonnet-20241022",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 200
-                },
-                timeout=30
-            )
-            response.raise_for_status()
-            
-            result_data = response.json()
-            
-            # Track token usage
-            usage = result_data.get("usage", {})
-            self.token_usage["input_tokens"] += usage.get("input_tokens", 0)
-            self.token_usage["output_tokens"] += usage.get("output_tokens", 0)
-            self.token_usage["total_tokens"] += usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
-            self.token_usage["llm_calls"] += 1
-
-            # Parse response
-            content = result_data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            
-            return self._parse_llm_response(template, content)
-            
-        except Exception as e:
-            logger.error(f"system.classifier: IBM Bob API failed: {e}")
+            logger.error(f"system.classifier: Bob Shell execution failed: {e}")
             return self._default_classification(template)
     
     def _parse_llm_response(
@@ -418,6 +383,12 @@ Consider:
             elif "```" in response_text:
                 response_text = response_text.split("```")[1].split("```")[0].strip()
             
+            # Find JSON object in response
+            start_idx = response_text.find('{')
+            end_idx = response_text.rfind('}') + 1
+            if start_idx >= 0 and end_idx > start_idx:
+                response_text = response_text[start_idx:end_idx]
+            
             result = json.loads(response_text)
             
             classification = Classification(
@@ -430,18 +401,19 @@ Consider:
             )
             
             logger.debug(
-                f"system.classifier: LLM classified {template.template_id} as "
+                f"system.classifier: Bob Shell classified {template.template_id} as "
                 f"{result['type']}/{result['severity']}"
             )
             
             return classification
             
         except Exception as e:
-            logger.error(f"system.classifier: Failed to parse LLM response: {e}")
+            logger.error(f"system.classifier: Failed to parse Bob Shell response: {e}")
+            logger.debug(f"system.classifier: Response was: {response_text[:200]}")
             return self._default_classification(template)
     
     def _default_classification(self, template: Template) -> Classification:
-        """Return default classification when LLM fails."""
+        """Return default classification when Bob Shell fails."""
         return Classification(
             template_id=template.template_id,
             type="APPLICATION",
@@ -451,4 +423,4 @@ Consider:
             method="default"
         )
 
-# Made with Bob
+# Made with Bob Shell
