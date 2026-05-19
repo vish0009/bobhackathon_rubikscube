@@ -601,12 +601,25 @@ async def get_stats():
         
         if _storage_backend:
             try:
-                for tier_name, tier_dir in _storage_backend.tier_directories.items():
+                import os
+                for tier_enum, tier_dir in _storage_backend.tier_directories.items():
                     logs_dir = tier_dir / "logs"
+                    
                     if logs_dir.exists() and logs_dir.is_dir():
-                        storage_tiers[tier_name.value] = sum(1 for path in logs_dir.rglob("*") if path.is_file())
-            except Exception:
-                logger.warning("system.api: Failed to calculate storage tier distribution", exc_info=True)
+                        # tier_enum is a Tier enum, get its value (string)
+                        tier_name = tier_enum.value if hasattr(tier_enum, 'value') else str(tier_enum)
+                        
+                        # Use os.listdir for better performance with large directories
+                        try:
+                            files = os.listdir(logs_dir)
+                            file_count = sum(1 for f in files if f.endswith('.json'))
+                            storage_tiers[tier_name] = file_count
+                            logger.debug(f"system.api: Found {file_count} files in {tier_name} tier")
+                        except Exception as e:
+                            logger.warning(f"system.api: Error counting files in {tier_name}: {e}")
+                            storage_tiers[tier_name] = 0
+            except Exception as e:
+                logger.error(f"system.api: Failed to calculate storage tier distribution: {e}", exc_info=True)
         
         return StatsResponse(
             total_logs_processed=sum(a.affected_log_count for a in _audit_trail),

@@ -60,43 +60,52 @@ pip install -e .
 
 The system now runs the complete pipeline from classification to execution.
 
-#### 1. Rules-Only Mode (No API Key Required)
+#### 1. Local LLM Mode (DEFAULT - RECOMMENDED)
 
 ```bash
+# Start your local LLM server (e.g., LM Studio on port 1234)
+# Then run the application - it will automatically use the local LLM
 python -m log_agent data/sample_logs.json data/sample_policy.json
 ```
 
-This mode uses only rule-based classification. Perfect for testing and development.
+**This is the default mode!** The system automatically connects to `http://127.0.0.1:1234` for local LLM inference. No API keys, no costs, no external calls!
 
-#### 2. Bob Shell Mode (Local AI Inference - RECOMMENDED)
+**Supported Local LLM Servers:**
+- LM Studio (port 1234 by default)
+- Ollama (port 11434)
+- llama.cpp server
+- text-generation-webui
+
+See [LOCAL_LLM_SETUP.md](LOCAL_LLM_SETUP.md) for detailed setup instructions.
+
+#### 2. Rules-Only Mode (No LLM)
 
 ```bash
-# Set environment variable to use Bob Shell
-export USE_BOB_SHELL=true
+# Disable LLM completely
+export USE_LOCAL_LLM=false
 
-# Optional: Specify Bob Shell path if not in PATH
-export BOB_SHELL_PATH=/path/to/bob
-
-# Run with Bob Shell LLM fallback
 python -m log_agent data/sample_logs.json data/sample_policy.json
 ```
 
-This mode uses Bob Shell (local AI assistant) for LLM fallback. No API costs, no authentication needed!
+This mode uses only rule-based classification. Perfect for testing without any LLM.
 
-#### 3. API-Based LLM Mode (Requires API Key)
+#### 3. Cloud API Mode (Requires API Key)
 
 ```bash
+# Disable local LLM first
+export USE_LOCAL_LLM=false
+
 # Option A: Use Anthropic API
 export ANTHROPIC_API_KEY=sk-ant-your_key_here
 
-# Option B: Use IBM Bob API (requires valid JWT token)
-export BOB_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+# Option B: Use IBM Bob API
+export BOB_API_KEY=your_bob_api_key
 
-# Run with API-based LLM fallback
+# Run with cloud API LLM fallback
 python -m log_agent data/sample_logs.json data/sample_policy.json
 ```
 
-This mode uses external API for LLM fallback. Requires valid API credentials.
+This mode uses external APIs for LLM fallback. Requires valid API credentials and incurs API costs.
 
 ### Expected Output (Phase 2)
 

@@ -66,7 +66,8 @@ def api_post(endpoint: str, data: Dict) -> Optional[Dict]:
     """Make POST request to API."""
     try:
         url = f"{API_BASE_URL}{endpoint}"
-        response = requests.post(url, json=data, headers=get_api_headers(), timeout=30)
+        # Increased timeout to 300s (5 minutes) for log processing with LLM
+        response = requests.post(url, json=data, headers=get_api_headers(), timeout=300)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -648,6 +649,39 @@ def show_log_ingestion():
     4. Execution (storage operations)
     """)
     
+    # LLM Configuration
+    with st.expander("⚙️ LLM Configuration", expanded=False):
+        st.markdown("""
+        **Control LLM Usage**: Adjust how many templates trigger LLM classification.
+        - Lower threshold = Fewer LLM calls = Faster processing
+        - Higher threshold = More LLM calls = Better accuracy
+        """)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            use_llm = st.checkbox("Enable LLM Fallback", value=True,
+                                 help="Use local LLM for ambiguous templates")
+        with col2:
+            confidence_threshold = st.slider(
+                "Confidence Threshold",
+                min_value=0.1,
+                max_value=0.9,
+                value=0.5,
+                step=0.1,
+                help="Templates with confidence below this will use LLM"
+            )
+        
+        st.info(f"""
+        **Current Setting**: Threshold = {confidence_threshold}
+        - Expected LLM calls: {"~10-20%" if confidence_threshold < 0.4 else "~30-40%" if confidence_threshold < 0.6 else "~60-80%"}
+        - Processing speed: {"⚡⚡⚡ Fast" if confidence_threshold < 0.4 else "⚡⚡ Moderate" if confidence_threshold < 0.6 else "⚡ Slower"}
+        """)
+        
+        if not use_llm:
+            st.warning("⚠️ LLM disabled - using rules-only classification")
+    
+    st.divider()
+    
     # Sample log template
     sample_log = {
         "log_id": "log_001",
@@ -681,16 +715,20 @@ def show_log_ingestion():
     
     if st.button("📤 Ingest Logs", type="primary"):
         try:
-            logs = json.loads(logs_json)
-            
-            if not isinstance(logs, list):
-                st.error("Logs must be a JSON array")
-                return
-            
-            result = api_post("/logs/ingest", {
-                "logs": logs,
-                "process_immediately": process_immediately
-            })
+            # Show processing message
+            with st.spinner("Processing logs... This may take a few minutes with LLM enabled."):
+                logs = json.loads(logs_json)
+                
+                if not isinstance(logs, list):
+                    st.error("Logs must be a JSON array")
+                    return
+                
+                # Note: LLM configuration is set via environment variables on the API server
+                # The UI settings here are for user awareness only
+                result = api_post("/logs/ingest", {
+                    "logs": logs,
+                    "process_immediately": process_immediately
+                })
             
             if result:
                 st.success(f"✅ {result.get('message', 'Success')}")

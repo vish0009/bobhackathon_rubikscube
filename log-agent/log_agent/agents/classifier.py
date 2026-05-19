@@ -36,9 +36,17 @@ class ClassificationAgent:
         Initialize the classification agent.
         
         Args:
-            use_llm: Whether to use LLM fallback (requires ANTHROPIC_API_KEY or BOB_API_KEY)
+            use_llm: Whether to use LLM fallback (requires ANTHROPIC_API_KEY, BOB_API_KEY, or LOCAL_LLM_ENDPOINT)
         """
         self.use_llm = use_llm
+        
+        # Check for local LLM endpoint first (highest priority)
+        self.local_llm_endpoint = os.getenv("LOCAL_LLM_ENDPOINT", "http://127.0.0.1:1234")
+        self.use_local_llm = os.getenv("USE_LOCAL_LLM", "true").lower() == "true"
+        
+        # Confidence threshold for LLM fallback (lower = fewer LLM calls)
+        self.llm_confidence_threshold = float(os.getenv("LLM_CONFIDENCE_THRESHOLD", "0.5"))
+        
         # Check for API keys - prefer Anthropic, fallback to IBM Bob
         self.api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("BOB_API_KEY")
         self.use_bob_endpoint = bool(os.getenv("BOB_API_KEY")) and not os.getenv("ANTHROPIC_API_KEY")
@@ -51,14 +59,18 @@ class ClassificationAgent:
             "llm_calls": 0
         }
         
-        if self.use_llm and not self.api_key:
-            logger.warning(
-                "system.classifier: No ANTHROPIC_API_KEY or BOB_API_KEY found, using rules-only mode"
-            )
-            self.use_llm = False
-        elif self.use_llm:
-            endpoint_type = "IBM Bob" if self.use_bob_endpoint else "Anthropic"
-            logger.info(f"system.classifier: Using {endpoint_type} endpoint for LLM fallback")
+        # Determine which LLM to use
+        if self.use_llm:
+            if self.use_local_llm:
+                logger.info(f"system.classifier: Using local LLM at {self.local_llm_endpoint}")
+            elif self.api_key:
+                endpoint_type = "IBM Bob" if self.use_bob_endpoint else "Anthropic"
+                logger.info(f"system.classifier: Using {endpoint_type} endpoint for LLM fallback")
+            else:
+                logger.warning(
+                    "system.classifier: No LLM endpoint configured, using rules-only mode"
+                )
+                self.use_llm = False
         
         # Initialize Drain3 with default config
         config = TemplateMinerConfig()
@@ -189,7 +201,12 @@ class ClassificationAgent:
         classification, confidence = self._rule_based_classify(template, sample_entries)
         
         # If confidence is low and LLM is available, use LLM fallback
-        if confidence < 0.7 and self.use_llm:
+        # Threshold can be adjusted via LLM_CONFIDENCE_THRESHOLD env var (default: 0.5)
+        if confidence < self.llm_confidence_threshold and self.use_llm:
+            logger.info(
+                f"system.classifier: Template {template.template_id} has low confidence "
+                f"({confidence:.2f} < {self.llm_confidence_threshold}), using LLM fallback"
+            )
             classification = self._llm_classify(template, sample_entries)
         
         # Cache the result
@@ -325,7 +342,10 @@ Consider:
 - Severity: How critical is this log for debugging/monitoring?
 - Signal Quality: How valuable is this for observability?"""
         
-        if self.use_bob_endpoint:
+        # Route to appropriate LLM endpoint
+        if self.use_local_llm:
+            return self._llm_classify_local(template, prompt)
+        elif self.use_bob_endpoint:
             return self._llm_classify_bob(template, prompt)
         else:
             return self._llm_classify_anthropic(template, prompt)
@@ -365,6 +385,45 @@ Consider:
             
         except Exception as e:
             logger.error(f"system.classifier: Anthropic API failed: {e}")
+            return self._default_classification(template)
+    
+    def _llm_classify_local(
+        self, template: Template, prompt: str
+    ) -> Classification:
+        """Use local LLM endpoint for classification."""
+        try:
+            import requests
+            
+            response = requests.post(
+                f"{self.local_llm_endpoint}/v1/chat/completions",
+                headers={
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 200,
+                    "temperature": 0.7
+                },
+                timeout=120  # Increased timeout for local LLM (was 30)
+            )
+            response.raise_for_status()
+            
+            result_data = response.json()
+            
+            # Track token usage
+            usage = result_data.get("usage", {})
+            self.token_usage["input_tokens"] += usage.get("prompt_tokens", 0)
+            self.token_usage["output_tokens"] += usage.get("completion_tokens", 0)
+            self.token_usage["total_tokens"] += usage.get("total_tokens", 0)
+            self.token_usage["llm_calls"] += 1
+
+            # Parse response
+            content = result_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            
+            return self._parse_llm_response(template, content)
+            
+        except Exception as e:
+            logger.error(f"system.classifier: Local LLM API failed: {e}")
             return self._default_classification(template)
     
     def _llm_classify_bob(
