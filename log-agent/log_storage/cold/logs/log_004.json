@@ -1,0 +1,1 @@
+{"log_id": "log_004", "timestamp": "2024-01-15 10:33:00+00:00", "service": "payment-processor", "environment": "prod", "log_level": "WARN", "message": "Payment gateway response slow: 2500ms", "access_count_last_30_days": 12, "tags": ["payment", "performance"], "template_id": null}

@@ -1,0 +1,1 @@
+{"log_id": "log_008", "timestamp": "2024-01-15 10:37:00+00:00", "service": "api-gateway", "environment": "prod", "log_level": "ERROR", "message": "Database connection failed: timeout after 45s", "access_count_last_30_days": 15, "tags": ["database", "critical"], "template_id": null}

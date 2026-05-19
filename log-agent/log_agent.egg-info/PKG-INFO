@@ -1,3 +1,31 @@
+Metadata-Version: 2.4
+Name: log-agent
+Version: 0.1.0
+Summary: Autonomous Log Cleanup & Archival Agent - Intelligent log management using agentic AI
+Author: Bob Hackathon Team
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: drain3>=0.9.11
+Requires-Dist: anthropic>=0.18.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: boto3>=1.28.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Requires-Dist: httpx>=0.25.0; extra == "dev"
+Provides-Extra: api
+Requires-Dist: fastapi>=0.104.0; extra == "api"
+Requires-Dist: uvicorn>=0.24.0; extra == "api"
+Requires-Dist: httpx>=0.25.0; extra == "api"
+Provides-Extra: dashboard
+Requires-Dist: streamlit>=1.28.0; extra == "dashboard"
+Requires-Dist: pandas>=2.0.0; extra == "dashboard"
+Requires-Dist: plotly>=5.17.0; extra == "dashboard"
+Requires-Dist: requests>=2.31.0; extra == "dashboard"
+
 # Autonomous Log Cleanup & Archival Agent
 
 An intelligent log management system using agentic AI to classify, assess, and manage log retention with cost optimization and compliance awareness.
@@ -60,52 +88,43 @@ pip install -e .
 
 The system now runs the complete pipeline from classification to execution.
 
-#### 1. Local LLM Mode (DEFAULT - RECOMMENDED)
+#### 1. Rules-Only Mode (No API Key Required)
 
 ```bash
-# Start your local LLM server (e.g., LM Studio on port 1234)
-# Then run the application - it will automatically use the local LLM
 python -m log_agent data/sample_logs.json data/sample_policy.json
 ```
 
-**This is the default mode!** The system automatically connects to `http://127.0.0.1:1234` for local LLM inference. No API keys, no costs, no external calls!
+This mode uses only rule-based classification. Perfect for testing and development.
 
-**Supported Local LLM Servers:**
-- LM Studio (port 1234 by default)
-- Ollama (port 11434)
-- llama.cpp server
-- text-generation-webui
-
-See [LOCAL_LLM_SETUP.md](LOCAL_LLM_SETUP.md) for detailed setup instructions.
-
-#### 2. Rules-Only Mode (No LLM)
+#### 2. Bob Shell Mode (Local AI Inference - RECOMMENDED)
 
 ```bash
-# Disable LLM completely
-export USE_LOCAL_LLM=false
+# Set environment variable to use Bob Shell
+export USE_BOB_SHELL=true
 
+# Optional: Specify Bob Shell path if not in PATH
+export BOB_SHELL_PATH=/path/to/bob
+
+# Run with Bob Shell LLM fallback
 python -m log_agent data/sample_logs.json data/sample_policy.json
 ```
 
-This mode uses only rule-based classification. Perfect for testing without any LLM.
+This mode uses Bob Shell (local AI assistant) for LLM fallback. No API costs, no authentication needed!
 
-#### 3. Cloud API Mode (Requires API Key)
+#### 3. API-Based LLM Mode (Requires API Key)
 
 ```bash
-# Disable local LLM first
-export USE_LOCAL_LLM=false
-
 # Option A: Use Anthropic API
 export ANTHROPIC_API_KEY=sk-ant-your_key_here
 
-# Option B: Use IBM Bob API
-export BOB_API_KEY=your_bob_api_key
+# Option B: Use IBM Bob API (requires valid JWT token)
+export BOB_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
-# Run with cloud API LLM fallback
+# Run with API-based LLM fallback
 python -m log_agent data/sample_logs.json data/sample_policy.json
 ```
 
-This mode uses external APIs for LLM fallback. Requires valid API credentials and incurs API costs.
+This mode uses external API for LLM fallback. Requires valid API credentials.
 
 ### Expected Output (Phase 2)
 
