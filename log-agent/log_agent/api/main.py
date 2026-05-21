@@ -596,7 +596,7 @@ async def update_policy(
 async def get_stats():
     """Get system statistics."""
     try:
-        # Count logs by tier
+        # Count logs by tier - initialize with uppercase keys as expected by dashboard
         storage_tiers = {"HOT": 0, "WARM": 0, "COLD": 0, "ARCHIVE": 0}
         
         if _storage_backend:
@@ -606,8 +606,10 @@ async def get_stats():
                     logs_dir = tier_dir / "logs"
                     
                     if logs_dir.exists() and logs_dir.is_dir():
-                        # tier_enum is a Tier enum, get its value (string)
-                        tier_name = tier_enum.value if hasattr(tier_enum, 'value') else str(tier_enum)
+                        # tier_enum is a Tier enum, get its value (string) and convert to uppercase
+                        # The Tier enum values are lowercase ("hot", "warm", "cold", "archive")
+                        # but the dashboard expects uppercase keys ("HOT", "WARM", "COLD", "ARCHIVE")
+                        tier_name = tier_enum.value.upper() if hasattr(tier_enum, 'value') else str(tier_enum).upper()
                         
                         # Use os.listdir for better performance with large directories
                         try:
